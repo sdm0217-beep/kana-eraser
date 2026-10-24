@@ -257,7 +257,7 @@ h2 {
 }
 .home-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding-top: 18px;
@@ -266,9 +266,12 @@ h2 {
   font-size: 1.7rem;
   letter-spacing: -0.02em;
 }
-.home-head p {
-  margin: 4px 0 0;
-  font-size: 0.9rem;
+.version {
+  margin-left: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--muted);
 }
 .accent {
   color: var(--cyan);

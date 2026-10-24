@@ -9,6 +9,7 @@ import {
   type ReviewOffer,
   type Theme,
 } from '../storage'
+import { APP_VERSION } from '../version'
 
 interface Props {
   prefs: Prefs
@@ -59,12 +60,10 @@ export default function Home({
   return (
     <div className="page home">
       <header className="home-head">
-        <div>
-          <h1>
-            가나 <span className="accent">지우기</span>
-          </h1>
-          <p className="muted">아는 글자를 지워가며 반복하는 암기법</p>
-        </div>
+        <h1>
+          가나 <span className="accent">지우기</span>
+          <span className="version">{APP_VERSION}</span>
+        </h1>
         <div className="seg small" role="radiogroup" aria-label="테마">
           {THEMES.map((t) => (
             <button
