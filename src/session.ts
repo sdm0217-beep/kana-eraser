@@ -13,11 +13,11 @@ export interface Session {
   round: number
   /** Kana still on the grid, in display order */
   remaining: string[]
-  /** Kana revealed this round; they can't be erased until the next round */
+  /** Kana revealed this round; they stay for the next round unless erased */
   seen: string[]
   removedAt: Record<string, number>
   /** Erasures of this round, newest last, for undo */
-  undo: { id: string; index: number }[]
+  undo: { id: string; index: number; seen?: boolean }[]
   elapsedMs: number
   resumedAt: number | null
   reviewOf?: string
@@ -116,13 +116,14 @@ export function reducer(s: Session | null, a: Action): Session | null {
       return { ...s, seen: [...s.seen, a.id] }
     case 'erase': {
       const index = s.remaining.indexOf(a.id)
-      if (s.round === 0 || index < 0 || s.seen.includes(a.id)) return s
-      const remaining = s.remaining.filter((id) => id !== a.id)
+      if (s.round === 0 || index < 0) return s
+      const seen = s.seen.includes(a.id)
       return {
         ...s,
-        remaining,
+        remaining: s.remaining.filter((id) => id !== a.id),
+        seen: seen ? s.seen.filter((id) => id !== a.id) : s.seen,
         removedAt: { ...s.removedAt, [a.id]: s.round },
-        undo: [...s.undo, { id: a.id, index }],
+        undo: [...s.undo, { id: a.id, index, seen }],
       }
     }
     case 'undo': {
@@ -132,7 +133,13 @@ export function reducer(s: Session | null, a: Action): Session | null {
       remaining.splice(last.index, 0, last.id)
       const removedAt = { ...s.removedAt }
       delete removedAt[last.id]
-      return { ...s, remaining, removedAt, undo: s.undo.slice(0, -1) }
+      return {
+        ...s,
+        remaining,
+        removedAt,
+        seen: last.seen ? [...s.seen, last.id] : s.seen,
+        undo: s.undo.slice(0, -1),
+      }
     }
     case 'pause':
       if (!s.resumedAt) return s

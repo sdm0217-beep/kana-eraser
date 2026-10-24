@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type Dispatch } from 'react'
+import { useRef, useState, type Dispatch } from 'react'
 import { KANA } from '../kana'
 import { toUnits, type Action, type Session } from '../session'
 
@@ -10,11 +10,10 @@ interface Props {
 
 const SWIPE_PX = 48
 const TAP_SLOP = 10
+const DOUBLE_TAP_MS = 320
 
 export default function Study({ session, dispatch, onExit }: Props) {
   const [eraseMode, setEraseMode] = useState(false)
-  const [toast, setToast] = useState<string | null>(null)
-  const toastTimer = useRef<number | undefined>(undefined)
 
   const { round, remaining, itemIds, seen, direction } = session
   const preview = round === 0
@@ -24,18 +23,8 @@ export default function Study({ session, dispatch, onExit }: Props) {
   const wide = remaining.some((id) => (k2r ? id.length > 1 : KANA[id].romaji.length > 2))
   const allSeen = !preview && remaining.length > 0 && remaining.every((id) => seen.includes(id))
 
-  const say = (msg: string) => {
-    setToast(msg)
-    window.clearTimeout(toastTimer.current)
-    toastTimer.current = window.setTimeout(() => setToast(null), 1600)
-  }
-  useEffect(() => () => window.clearTimeout(toastTimer.current), [])
-
   const erase = (id: string) => {
-    if (seen.includes(id)) {
-      say('본 글자는 이번 회차에 못 지워요')
-      return
-    }
+    if (preview) return
     navigator.vibrate?.(8)
     dispatch({ type: 'erase', id })
   }
@@ -83,7 +72,7 @@ export default function Study({ session, dispatch, onExit }: Props) {
           ? '정답을 보면서 한 번 훑어보세요.'
           : eraseMode
             ? '지우기 모드: 탭하면 지워져요.'
-            : '탭: 정답 보기 · 옆으로 밀기: 알아(지우기)'}
+            : '탭: 정답 보기 · 맞으면 더블탭 또는 → 밀어서 지우기'}
       </p>
 
       <main className={`grid ${wide ? 'wide' : ''}`}>
@@ -96,7 +85,7 @@ export default function Study({ session, dispatch, onExit }: Props) {
               state={preview ? 'preview' : seen.includes(id) ? 'seen' : 'hidden'}
               grouped={unit.length > 1}
               onTap={() => tap(id)}
-              onSwipe={() => !preview && erase(id)}
+              onErase={() => erase(id)}
             />
           ))
           if (unit.length === 1) return cells
@@ -114,12 +103,6 @@ export default function Study({ session, dispatch, onExit }: Props) {
           )
         })}
       </main>
-
-      {toast && (
-        <div className="toast" role="status">
-          {toast}
-        </div>
-      )}
 
       <footer className="bar">
         {preview ? (
@@ -165,12 +148,13 @@ interface CellProps {
   state: 'preview' | 'hidden' | 'seen'
   grouped: boolean
   onTap: () => void
-  onSwipe: () => void
+  onErase: () => void
 }
 
-function Cell({ id, k2r, state, grouped, onTap, onSwipe }: CellProps) {
+function Cell({ id, k2r, state, grouped, onTap, onErase }: CellProps) {
   const ref = useRef<HTMLDivElement>(null)
   const start = useRef<{ x: number; y: number; id: number } | null>(null)
+  const lastTap = useRef(0)
   const [dx, setDx] = useState(0)
 
   const kana = KANA[id]
@@ -189,8 +173,8 @@ function Cell({ id, k2r, state, grouped, onTap, onSwipe }: CellProps) {
       role="button"
       tabIndex={0}
       aria-label={showAnswer ? `${face}, 정답 ${answer}` : `${face}, 정답 가려짐`}
-      className={`cell ${state} ${grouped ? 'grouped' : ''} ${Math.abs(dx) > SWIPE_PX ? 'armed' : ''}`}
-      style={dx ? { transform: `translateX(${dx}px)`, opacity: 1 - Math.min(Math.abs(dx) / 160, 0.6) } : undefined}
+      className={`cell ${state} ${grouped ? 'grouped' : ''} ${dx > SWIPE_PX ? 'armed' : ''}`}
+      style={dx ? { transform: `translateX(${dx}px)`, opacity: 1 - Math.min(dx / 160, 0.6) } : undefined}
       onPointerDown={(e) => {
         start.current = { x: e.clientX, y: e.clientY, id: e.pointerId }
         // Keep receiving the pointer even if a fast swipe ends over another cell.
@@ -201,10 +185,9 @@ function Cell({ id, k2r, state, grouped, onTap, onSwipe }: CellProps) {
         if (!s || s.id !== e.pointerId) return
         const mx = e.clientX - s.x
         const my = e.clientY - s.y
-        if (Math.abs(mx) > TAP_SLOP && Math.abs(mx) > Math.abs(my)) {
-          ref.current?.setPointerCapture(e.pointerId)
-          setDx(mx)
-        }
+        // Only a rightward swipe erases, so only follow the finger to the right.
+        if (mx > TAP_SLOP && mx > Math.abs(my)) setDx(mx)
+        else if (dx) setDx(0)
       }}
       onPointerUp={(e) => {
         const s = start.current
@@ -212,8 +195,18 @@ function Cell({ id, k2r, state, grouped, onTap, onSwipe }: CellProps) {
         const mx = e.clientX - s.x
         const my = e.clientY - s.y
         reset()
-        if (Math.abs(mx) > SWIPE_PX && Math.abs(mx) > Math.abs(my)) onSwipe()
-        else if (Math.abs(mx) < TAP_SLOP && Math.abs(my) < TAP_SLOP) onTap()
+        if (mx > SWIPE_PX && mx > Math.abs(my)) {
+          onErase()
+        } else if (Math.abs(mx) < TAP_SLOP && Math.abs(my) < TAP_SLOP) {
+          const now = performance.now()
+          if (now - lastTap.current < DOUBLE_TAP_MS) {
+            lastTap.current = 0
+            onErase()
+          } else {
+            lastTap.current = now
+            onTap()
+          }
+        }
       }}
       onPointerCancel={reset}
       onKeyDown={(e) => {
@@ -221,7 +214,7 @@ function Cell({ id, k2r, state, grouped, onTap, onSwipe }: CellProps) {
           e.preventDefault()
           onTap()
         } else if (e.key === 'Delete' || e.key === 'Backspace') {
-          onSwipe()
+          onErase()
         }
       }}
     >
