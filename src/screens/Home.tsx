@@ -87,7 +87,7 @@ export default function Home({
             </strong>
             <span className="muted">
               {' '}
-              · 남은 {session.remaining.length} / 전체 {session.itemIds.length}
+              · 남은 {session.remaining.length + session.passed.length} / 전체 {session.itemIds.length}
             </span>
           </div>
           <div className="row">

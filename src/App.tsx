@@ -19,8 +19,8 @@ type Screen = 'home' | 'study' | 'done'
 
 function initSession(): Session | null {
   const s = loadSession()
-  // Time while the app was closed doesn't count.
-  return s ? { ...s, resumedAt: null } : null
+  // Time while the app was closed doesn't count. Sessions saved before v2.0 have no `passed`.
+  return s ? { ...s, passed: s.passed ?? [], resumedAt: null } : null
 }
 
 export default function App() {
@@ -58,7 +58,13 @@ export default function App() {
   }, [screen])
 
   useEffect(() => {
-    if (!session || session.round === 0 || session.remaining.length > 0) return
+    if (
+      !session ||
+      session.round === 0 ||
+      session.remaining.length > 0 ||
+      session.passed.length > 0
+    )
+      return
     const c: Completion = {
       id: session.id,
       date: localDate(),

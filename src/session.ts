@@ -11,13 +11,15 @@ export interface Session {
   groups: string[][]
   /** Round 0 is the preview pass */
   round: number
-  /** Kana still on the grid, in display order */
+  /** Kana still in this round's list, in display order */
   remaining: string[]
+  /** Kana swiped away as unknown this round; they come back next round */
+  passed: string[]
   /** Kana revealed this round; they stay for the next round unless erased */
   seen: string[]
   removedAt: Record<string, number>
   /** Erasures of this round, newest last, for undo */
-  undo: { id: string; index: number; seen?: boolean }[]
+  undo: { id: string; index: number; seen?: boolean; passed?: boolean }[]
   elapsedMs: number
   resumedAt: number | null
   reviewOf?: string
@@ -76,6 +78,7 @@ export function createSession(
     groups,
     round: 0,
     remaining: toUnits(itemIds, groups).flat(),
+    passed: [],
     seen: [],
     removedAt: {},
     undo: [],
@@ -90,6 +93,7 @@ export type Action =
   | { type: 'nextRound' }
   | { type: 'reveal'; id: string }
   | { type: 'erase'; id: string }
+  | { type: 'pass'; id: string }
   | { type: 'undo' }
   | { type: 'pause' }
   | { type: 'resume' }
@@ -98,33 +102,46 @@ export function elapsed(s: Session, now = Date.now()): number {
   return s.elapsedMs + (s.resumedAt ? now - s.resumedAt : 0)
 }
 
+function nextRound(s: Session): Session {
+  return {
+    ...s,
+    round: s.round + 1,
+    remaining: toUnits([...s.passed, ...s.remaining], s.groups, true).flat(),
+    passed: [],
+    seen: [],
+    undo: [],
+    resumedAt: s.resumedAt ?? Date.now(),
+  }
+}
+
+/** Once every kana in the list is swiped away, the unknown ones start the next round. */
+function advanceIfEmpty(s: Session): Session {
+  return s.remaining.length === 0 && s.passed.length > 0 ? nextRound(s) : s
+}
+
 export function reducer(s: Session | null, a: Action): Session | null {
   if (a.type === 'load') return a.session
   if (!s) return s
   switch (a.type) {
     case 'nextRound':
-      return {
-        ...s,
-        round: s.round + 1,
-        remaining: toUnits(s.remaining, s.groups, true).flat(),
-        seen: [],
-        undo: [],
-        resumedAt: s.resumedAt ?? Date.now(),
-      }
+      return nextRound(s)
     case 'reveal':
       if (s.round === 0 || s.seen.includes(a.id)) return s
       return { ...s, seen: [...s.seen, a.id] }
-    case 'erase': {
+    case 'erase':
+    case 'pass': {
       const index = s.remaining.indexOf(a.id)
       if (s.round === 0 || index < 0) return s
       const seen = s.seen.includes(a.id)
-      return {
+      const passed = a.type === 'pass'
+      return advanceIfEmpty({
         ...s,
         remaining: s.remaining.filter((id) => id !== a.id),
+        passed: passed ? [...s.passed, a.id] : s.passed,
         seen: seen ? s.seen.filter((id) => id !== a.id) : s.seen,
-        removedAt: { ...s.removedAt, [a.id]: s.round },
-        undo: [...s.undo, { id: a.id, index, seen }],
-      }
+        removedAt: passed ? s.removedAt : { ...s.removedAt, [a.id]: s.round },
+        undo: [...s.undo, { id: a.id, index, seen, passed }],
+      })
     }
     case 'undo': {
       const last = s.undo[s.undo.length - 1]
@@ -132,10 +149,11 @@ export function reducer(s: Session | null, a: Action): Session | null {
       const remaining = [...s.remaining]
       remaining.splice(last.index, 0, last.id)
       const removedAt = { ...s.removedAt }
-      delete removedAt[last.id]
+      if (!last.passed) delete removedAt[last.id]
       return {
         ...s,
         remaining,
+        passed: last.passed ? s.passed.filter((id) => id !== last.id) : s.passed,
         removedAt,
         seen: last.seen ? [...s.seen, last.id] : s.seen,
         undo: s.undo.slice(0, -1),
